@@ -1,12 +1,13 @@
-﻿using UnityEngine;
+﻿// BoardManager.cs
+using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
 
 // ✅ enum наружу
 public enum RuleType
 {
     None,
-
     PawnForwardCapture,     // Rule 1
     AllPiecesMoveAsPawn,    // Rule 2
     KnightsSlide,           // Rule 3
@@ -30,22 +31,28 @@ public class BoardManager : MonoBehaviour
     [Header("Камера")]
     public CameraController cameraController;
 
-    // ❌ СТАРЫЕ ПОЛЯ Rules Shift больше не используются:
-    // public int roundsPerShift
-    // public int ruleDurationRounds
-    // private int ruleHalfMovesLeft
-
     [Header("UI")]
-    public TMP_Text turnsText;              // TurnsText (в углу)
-    public TMP_Text rulePanelTitle;         // RulePanelTitle
-    public TMP_Text rulePanelText;          // RulePanelText
-    public Button rulePanelOkButton;        // RulePanel OK button
-    public RulePanelAnimator rulePanelAnimator; // ✅ RulePanelAnimator на RulePanel
+    public TMP_Text turnsText;
+    public TMP_Text rulePanelTitle;
+    public TMP_Text rulePanelText;
+    public Button rulePanelOkButton;
+    public RulePanelAnimator rulePanelAnimator;
     public float rulePanelTitleFontSize = 40f;
     public float rulePanelBodyFontSize = 30f;
     public float turnsFontSize = 28f;
 
-    private int halfMoveCount = 0;          // полуходы (каждый ход = +1)
+    [Header("UI - Check & Game Over")]
+    public CheckWarningUI checkWarningUI; // ✅ ссылка на UIManager (где висит CheckWarningUI)
+    public TMP_Text checkText;            // ✅ CheckText внутри CheckPanel
+
+    public GameObject gameOverPanel;
+    public TMP_Text gameOverTitleText;
+    public TMP_Text gameOverBodyText;
+
+    public Button restartButton;
+    public Button menuButton;
+
+    private int halfMoveCount = 0;
     private RuleType currentRule = RuleType.None;
     private bool waitingForRulePanelConfirm = false;
 
@@ -53,13 +60,9 @@ public class BoardManager : MonoBehaviour
     private int hoverX = -1;
     private int hoverY = -1;
 
-    // Очередность хода
     private bool isWhiteTurn = true;
-
-    // Флаг конца игры
     private bool gameOver = false;
 
-    // ===== RULE ORDER SYSTEM =====
     private RuleType[] orderedRules = new RuleType[]
     {
         RuleType.PawnForwardCapture,
@@ -71,34 +74,31 @@ public class BoardManager : MonoBehaviour
     private int orderedRuleIndex = 0;
     private bool randomModeUnlocked = false;
 
-    // ===== RULE TIMELINE SYSTEM (3 start delay → 3 active → 2 cooldown) =====
     private enum RulePhase
     {
-        StartDelay,     // 3 раунда без правила в начале
-        ActiveRule,     // правило активно 3 раунда
-        Cooldown        // пауза 2 раунда
+        StartDelay,
+        ActiveRule,
+        Cooldown
     }
 
     [Header("Rule Timeline (Rounds)")]
-    public int startDelayRounds = 3;   // 1️⃣ старт: 3 раунда без правила
-    public int activeRuleRounds = 3;   // правило действует 3 раунда
-    public int cooldownRounds = 2;     // пауза 2 раунда
+    public int startDelayRounds = 3;
+    public int activeRuleRounds = 3;
+    public int cooldownRounds = 2;
 
     private RulePhase rulePhase = RulePhase.StartDelay;
-    private int phaseHalfMovesLeft = 0; // сколько полуходов осталось в текущей фазе
+    private int phaseHalfMovesLeft = 0;
 
     private void Start()
     {
         SpawnAllPieces();
 
-        // На старте: правило не активно
         currentRule = RuleType.None;
 
-        // Стартовая задержка: 3 раунда без правила
         rulePhase = RulePhase.StartDelay;
         phaseHalfMovesLeft = startDelayRounds * 2;
 
-        // Прячем панель аккуратно (аниматор сам держит alpha=0)
+        // Rule panel
         if (rulePanelAnimator != null)
             rulePanelAnimator.gameObject.SetActive(false);
 
@@ -109,8 +109,27 @@ public class BoardManager : MonoBehaviour
             rulePanelOkButton.gameObject.SetActive(false);
         }
 
+        // ✅ скрыть UI
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (checkWarningUI != null) checkWarningUI.HideImmediate();
+
+        // Buttons
+        if (restartButton != null)
+        {
+            restartButton.onClick.RemoveAllListeners();
+            restartButton.onClick.AddListener(RestartScene);
+        }
+
+        if (menuButton != null)
+        {
+            menuButton.onClick.RemoveAllListeners();
+            menuButton.onClick.AddListener(LoadMenu);
+        }
+
         ApplyUiFontSizes();
         UpdateTurnsText();
+
+        Debug.Log("[BoardManager] Start OK. Scene: " + SceneManager.GetActiveScene().name);
     }
 
     private void Update()
@@ -147,39 +166,26 @@ public class BoardManager : MonoBehaviour
         }
     }
 
-    // =============================================
-    // ВЫБОР ФИГУРЫ
-    // =============================================
     private void SelectPiece(int x, int y)
     {
         if (chessPieces[x, y] == null) return;
 
         if (chessPieces[x, y].isWhite == isWhiteTurn)
-        {
             activePiece = chessPieces[x, y];
-            Debug.Log($"Выбрана фигура: {activePiece.type} на ({x},{y})");
-        }
         else
-        {
             Debug.Log("Сейчас не ваш ход!");
-        }
     }
 
-    // =============================================
-    // ВЫПОЛНЕНИЕ ХОДА
-    // =============================================
     private void MovePiece(int x, int y)
     {
         if (activePiece == null) return;
 
-        // Если кликнули на свою же фигуру — переключаем выбор
         if (chessPieces[x, y] != null && chessPieces[x, y].isWhite == activePiece.isWhite)
         {
             SelectPiece(x, y);
             return;
         }
 
-        // Проверяем легальность
         if (!IsValidMove(activePiece, x, y))
         {
             Debug.Log("Ход недопустим по правилам!");
@@ -187,7 +193,6 @@ public class BoardManager : MonoBehaviour
             return;
         }
 
-        // Проверяем шах себе
         if (DoesMoveCauseCheck(activePiece, x, y, activePiece.isWhite))
         {
             Debug.Log("Нельзя! Ваш король окажется под шахом!");
@@ -195,21 +200,15 @@ public class BoardManager : MonoBehaviour
             return;
         }
 
-        // Запоминаем взятую фигуру
         ChessPiece capturedPiece = chessPieces[x, y];
 
-        // Выполняем ход
         chessPieces[activePiece.currentX, activePiece.currentY] = null;
         chessPieces[x, y] = activePiece;
         activePiece.hasMoved = true;
         activePiece.PositionPiece(x, y, boardOffset, tileSize);
 
-        // Уничтожаем взятую фигуру
         if (capturedPiece != null)
-        {
-            Debug.Log($"Взята фигура: {capturedPiece.type}");
             Destroy(capturedPiece.gameObject);
-        }
 
         activePiece = null;
 
@@ -222,57 +221,56 @@ public class BoardManager : MonoBehaviour
             else cameraController.SwitchToBlack();
         }
 
-        // ✅ полуход сделан
         halfMoveCount++;
 
-        // ✅ обновляем таймлайн правил (старт → правило → пауза → ...)
-        UpdateRuleTimeline();
-
-        // Проверяем состояние игры
+        // ✅ СНАЧАЛА проверяем мат/пат/шах
         CheckGameState();
+
+        // ✅ Если игра не закончена — только тогда обновляем правила
+        if (!gameOver)
+        {
+            UpdateRuleTimeline();
+        }
+        else
+        {
+            // ✅ На всякий случай закрываем rule UI, чтобы не вылезло
+            ForceHideRuleUI();
+        }
     }
 
-    // =============================================
-    // RULE TIMELINE (3 start delay → 3 active → 2 cooldown)
-    // =============================================
     private void UpdateRuleTimeline()
     {
+        if (gameOver) return; // ✅ защита
+
         if (phaseHalfMovesLeft > 0)
             phaseHalfMovesLeft--;
 
         switch (rulePhase)
         {
             case RulePhase.StartDelay:
-                if (phaseHalfMovesLeft <= 0)
-                    StartNewRule();
+                if (phaseHalfMovesLeft <= 0) StartNewRule();
                 break;
-
             case RulePhase.ActiveRule:
-                if (phaseHalfMovesLeft <= 0)
-                    EndCurrentRuleAndStartCooldown();
+                if (phaseHalfMovesLeft <= 0) EndCurrentRuleAndStartCooldown();
                 break;
-
             case RulePhase.Cooldown:
-                if (phaseHalfMovesLeft <= 0)
-                    StartNewRule();
+                if (phaseHalfMovesLeft <= 0) StartNewRule();
                 break;
         }
 
-        UpdateTurnsText(); // ✅ всегда обновляем UI
+        UpdateTurnsText();
     }
 
     private void StartNewRule()
     {
+        if (gameOver) return; // ✅ защита
+
         currentRule = GetNextRule();
 
         rulePhase = RulePhase.ActiveRule;
         phaseHalfMovesLeft = activeRuleRounds * 2;
 
         waitingForRulePanelConfirm = true;
-
-        Debug.Log($"NEW RULE: {GetRuleDescription()} ({phaseHalfMovesLeft} полуходов)");
-
-        UpdateTurnsText();
 
         if (rulePanelTitle != null) rulePanelTitle.text = "NEW RULE";
         if (rulePanelText != null) rulePanelText.text = GetRuleDescription();
@@ -282,37 +280,33 @@ public class BoardManager : MonoBehaviour
 
         if (rulePanelAnimator != null)
             rulePanelAnimator.ShowPersistent(true);
+
+        UpdateTurnsText();
     }
 
     private void EndCurrentRuleAndStartCooldown()
     {
+        if (gameOver) return;
+
         currentRule = RuleType.None;
         rulePhase = RulePhase.Cooldown;
         phaseHalfMovesLeft = cooldownRounds * 2;
-
-        Debug.Log("RULE ENDED → cooldown (pause)");
-
         UpdateTurnsText();
     }
 
     private RuleType GetNextRule()
     {
-        // сначала выдаем правила по порядку
         if (!randomModeUnlocked)
         {
             RuleType rule = orderedRules[orderedRuleIndex];
             orderedRuleIndex++;
 
             if (orderedRuleIndex >= orderedRules.Length)
-            {
-                randomModeUnlocked = true; // после полного круга — включаем рандом
-                Debug.Log("RANDOM RULE MODE ACTIVATED");
-            }
+                randomModeUnlocked = true;
 
             return rule;
         }
 
-        // дальше — случайное правило (и после каждого правила будет 2 раунда пауза)
         int r = Random.Range(0, orderedRules.Length);
         return orderedRules[r];
     }
@@ -347,76 +341,140 @@ public class BoardManager : MonoBehaviour
             rulePanelAnimator.HideNow();
     }
 
-    private void ApplyUiFontSizes()
+    // ✅ безопасно скрываем Rule UI (без NullReference)
+    private void ForceHideRuleUI()
     {
-        if (rulePanelTitle != null)
-            rulePanelTitle.fontSize = rulePanelTitleFontSize;
+        waitingForRulePanelConfirm = false;
 
-        if (rulePanelText != null)
-            rulePanelText.fontSize = rulePanelBodyFontSize;
+        if (rulePanelOkButton != null)
+            rulePanelOkButton.gameObject.SetActive(false);
 
-        if (turnsText != null)
-            turnsText.fontSize = turnsFontSize;
+        if (rulePanelAnimator != null)
+        {
+            if (rulePanelAnimator.gameObject.activeInHierarchy)
+                rulePanelAnimator.HideNow();
+            else
+                rulePanelAnimator.gameObject.SetActive(false);
+        }
     }
 
-    // ✅ разные тексты для разных правил
+    private void ApplyUiFontSizes()
+    {
+        if (rulePanelTitle != null) rulePanelTitle.fontSize = rulePanelTitleFontSize;
+        if (rulePanelText != null) rulePanelText.fontSize = rulePanelBodyFontSize;
+        if (turnsText != null) turnsText.fontSize = turnsFontSize;
+    }
+
     private string GetRuleDescription()
     {
         switch (currentRule)
         {
-            case RuleType.PawnForwardCapture:
-                return "Пешка может атаковать фигуру\nпрямо перед собой.";
-
-            case RuleType.AllPiecesMoveAsPawn:
-                return "Все фигуры кроме короля\nходят как пешки.";
-
-            case RuleType.KnightsSlide:
-                return "Кони забыли как прыгать.\nХодят на 2 клетки по прямой.";
-
-            case RuleType.BishopPhase:
-                return "Слоны проходят сквозь фигуры.";
-
-            default:
-                return "";
+            case RuleType.PawnForwardCapture: return "Пешка может атаковать фигуру\nпрямо перед собой.";
+            case RuleType.AllPiecesMoveAsPawn: return "Все фигуры кроме короля\nходят как пешки.";
+            case RuleType.KnightsSlide: return "Кони забыли как прыгать.\nХодят на 2 клетки по прямой.";
+            case RuleType.BishopPhase: return "Слоны проходят сквозь фигуры.";
+            default: return "";
         }
     }
 
     // =============================================
-    // ПРОВЕРКА СОСТОЯНИЯ ИГРЫ (ШАХ / МАТ / ПАТ)
+    // ✅ UI: CHECK + GAME OVER
+    // =============================================
+    private void ShowCheckWarning(bool whiteKingInCheck)
+    {
+        if (gameOver) return;
+
+        if (checkText != null)
+        {
+            checkText.text = whiteKingInCheck
+                ? "ШАХ! Белый король под ударом"
+                : "ШАХ! Чёрный король под ударом";
+        }
+
+        if (checkWarningUI != null)
+            checkWarningUI.ShowCheck();
+        else
+            Debug.LogWarning("[CHECK UI] checkWarningUI is NOT assigned in Inspector!");
+    }
+
+    private void HideCheckWarning()
+    {
+        if (checkWarningUI != null)
+            checkWarningUI.HideImmediate();
+    }
+
+    private void ShowGameOver(string title, string body)
+    {
+        // ✅ закрываем лишние UI
+        ForceHideRuleUI();
+        HideCheckWarning();
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        else Debug.LogWarning("[GameOver] gameOverPanel NOT assigned!");
+
+        if (gameOverTitleText != null) gameOverTitleText.text = title;
+        else Debug.LogWarning("[GameOver] gameOverTitleText NOT assigned!");
+
+        if (gameOverBodyText != null) gameOverBodyText.text = body;
+        else Debug.LogWarning("[GameOver] gameOverBodyText NOT assigned!");
+    }
+
+    private void RestartScene()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    private void LoadMenu()
+    {
+        SceneManager.LoadScene("MainMenu");
+    }
+
+    // =============================================
+    // ШАХ / МАТ / ПАТ
     // =============================================
     private void CheckGameState()
     {
-        bool currentPlayerIsWhite = isWhiteTurn;
-        bool kingInCheck = IsKingInCheck(currentPlayerIsWhite);
-        bool hasLegalMoves = HasAnyLegalMove(currentPlayerIsWhite);
+        bool sideToMoveIsWhite = isWhiteTurn;
 
+        bool kingInCheck = IsKingInCheck(sideToMoveIsWhite);
+        bool hasLegalMoves = HasAnyLegalMove(sideToMoveIsWhite);
+
+        // CHECKMATE
         if (kingInCheck && !hasLegalMoves)
         {
             gameOver = true;
-            string winner = currentPlayerIsWhite ? "Чёрные" : "Белые";
-            Debug.Log($"ШАХ И МАТ! Победили {winner}!");
+
+            bool whiteWon = !sideToMoveIsWhite;
+
+            ShowGameOver(
+                "CHECKMATE",
+                whiteWon ? "Белые победили!" : "Чёрные победили!"
+            );
+            return;
         }
-        else if (!kingInCheck && !hasLegalMoves)
+
+        // STALEMATE
+        if (!kingInCheck && !hasLegalMoves)
         {
             gameOver = true;
-            Debug.Log("ПАТ! Ничья!");
+            ShowGameOver("STALEMATE", "ПАТ! Ничья");
+            return;
         }
-        else if (kingInCheck)
-        {
-            Debug.Log($"ШАХ! {(currentPlayerIsWhite ? "Белый" : "Чёрный")} король под ударом!");
-        }
+
+        // CHECK
+        if (kingInCheck)
+            ShowCheckWarning(sideToMoveIsWhite);
         else
-        {
-            Debug.Log("Ход перешел к: " + (isWhiteTurn ? "Белым" : "Черным"));
-        }
+            HideCheckWarning();
     }
 
     // =============================================
-    // ШАХ: король под ударом?
+    // CHECK LOGIC
     // =============================================
     private bool IsKingInCheck(bool whiteKing)
     {
         int kingX = -1, kingY = -1;
+
         for (int x = 0; x < TILE_COUNT_X; x++)
         {
             for (int y = 0; y < TILE_COUNT_Y; y++)
@@ -444,7 +502,9 @@ public class BoardManager : MonoBehaviour
             {
                 ChessPiece p = chessPieces[x, y];
                 if (p == null || p.isWhite == defendingIsWhite) continue;
-                if (IsValidMove(p, targetX, targetY)) return true;
+
+                if (IsValidMove(p, targetX, targetY))
+                    return true;
             }
         }
         return false;
@@ -454,19 +514,18 @@ public class BoardManager : MonoBehaviour
     {
         int fromX = piece.currentX;
         int fromY = piece.currentY;
-        ChessPiece targetBackup = chessPieces[toX, toY];
 
+        ChessPiece capturedBackup = chessPieces[toX, toY];
+
+        // ✅ Симулируем ход только в массиве
         chessPieces[fromX, fromY] = null;
         chessPieces[toX, toY] = piece;
-        piece.currentX = toX;
-        piece.currentY = toY;
 
         bool inCheck = IsKingInCheck(isWhitePiece);
 
-        piece.currentX = fromX;
-        piece.currentY = fromY;
+        // ✅ Откат
         chessPieces[fromX, fromY] = piece;
-        chessPieces[toX, toY] = targetBackup;
+        chessPieces[toX, toY] = capturedBackup;
 
         return inCheck;
     }
@@ -495,20 +554,21 @@ public class BoardManager : MonoBehaviour
     }
 
     // =============================================
-    // ДИСПЕТЧЕР ПРАВИЛ
+    // MOVE VALIDATION + RULES
     // =============================================
     private bool IsValidMove(ChessPiece piece, int targetX, int targetY)
     {
         if (piece.currentX == targetX && piece.currentY == targetY) return false;
 
-        if (chessPieces[targetX, targetY] != null && chessPieces[targetX, targetY].isWhite == piece.isWhite)
+        if (chessPieces[targetX, targetY] != null &&
+            chessPieces[targetX, targetY].isWhite == piece.isWhite)
             return false;
 
-        // ===== RULE 2 — все фигуры как пешки =====
+        // RULE 2: все фигуры как пешки
         if (currentRule == RuleType.AllPiecesMoveAsPawn && piece.type != ChessPieceType.King)
             return IsPawnMoveValid(piece, targetX, targetY);
 
-        // ===== RULE 3 — кони скользят =====
+        // RULE 3: кони скользят
         if (currentRule == RuleType.KnightsSlide && piece.type == ChessPieceType.Knight)
             return IsKnightSlideMove(piece, targetX, targetY);
 
@@ -521,37 +581,29 @@ public class BoardManager : MonoBehaviour
             case ChessPieceType.Queen: return IsRookMoveValid(piece, targetX, targetY) || IsBishopMoveValid(piece, targetX, targetY);
             case ChessPieceType.King: return IsKingMoveValid(piece, targetX, targetY);
         }
+
         return false;
     }
 
-    // =============================================
-    // ПЕШКА + PawnForwardCapture
-    // =============================================
     private bool IsPawnMoveValid(ChessPiece piece, int targetX, int targetY)
     {
         int direction = piece.isWhite ? 1 : -1;
 
-        // Вперёд на 1
         if (piece.currentX == targetX && targetY == piece.currentY + direction)
         {
-            // RULE: можно бить вперёд если враг
             if (currentRule == RuleType.PawnForwardCapture)
             {
                 if (chessPieces[targetX, targetY] != null && chessPieces[targetX, targetY].isWhite != piece.isWhite)
                     return true;
             }
-
-            // обычное: вперед только если пусто
             return chessPieces[targetX, targetY] == null;
         }
 
-        // Вперёд на 2 (старт)
         bool isStartRow = (piece.isWhite && piece.currentY == 1) || (!piece.isWhite && piece.currentY == 6);
         if (piece.currentX == targetX && isStartRow && targetY == piece.currentY + direction * 2)
             return chessPieces[targetX, targetY] == null &&
                    chessPieces[targetX, piece.currentY + direction] == null;
 
-        // Диагональное взятие
         if (Mathf.Abs(targetX - piece.currentX) == 1 && targetY == piece.currentY + direction)
             if (chessPieces[targetX, targetY] != null && chessPieces[targetX, targetY].isWhite != piece.isWhite)
                 return true;
@@ -586,13 +638,11 @@ public class BoardManager : MonoBehaviour
         return (dx == 2 && dy == 1) || (dx == 1 && dy == 2);
     }
 
-    // RULE 3 — кони больше не прыгают, а "скользят" на 2 клетки по прямой
     private bool IsKnightSlideMove(ChessPiece piece, int targetX, int targetY)
     {
         int dx = Mathf.Abs(targetX - piece.currentX);
         int dy = Mathf.Abs(targetY - piece.currentY);
 
-        // только по прямой на 2 клетки
         if ((dx == 2 && dy == 0) || (dx == 0 && dy == 2))
         {
             int xDir = (targetX > piece.currentX) ? 1 : (targetX < piece.currentX ? -1 : 0);
@@ -601,7 +651,6 @@ public class BoardManager : MonoBehaviour
             int checkX = piece.currentX + xDir;
             int checkY = piece.currentY + yDir;
 
-            // нельзя перепрыгивать фигуры (в середине)
             if (chessPieces[checkX, checkY] != null)
                 return false;
 
@@ -616,7 +665,6 @@ public class BoardManager : MonoBehaviour
         if (Mathf.Abs(targetX - piece.currentX) != Mathf.Abs(targetY - piece.currentY))
             return false;
 
-        // RULE 4 — слон проходит сквозь фигуры
         if (currentRule == RuleType.BishopPhase)
             return true;
 
@@ -644,13 +692,12 @@ public class BoardManager : MonoBehaviour
     }
 
     // =============================================
-    // СПАВН
+    // SPAWN
     // =============================================
     private void SpawnAllPieces()
     {
         chessPieces = new ChessPiece[TILE_COUNT_X, TILE_COUNT_Y];
 
-        // --- БЕЛЫЕ ---
         for (int i = 0; i < 8; i++) SpawnSinglePiece(0, i, 1);
         SpawnSinglePiece(1, 0, 0); SpawnSinglePiece(1, 7, 0);
         SpawnSinglePiece(2, 1, 0); SpawnSinglePiece(2, 6, 0);
@@ -658,7 +705,6 @@ public class BoardManager : MonoBehaviour
         SpawnSinglePiece(4, 3, 0);
         SpawnSinglePiece(5, 4, 0);
 
-        // --- ЧЕРНЫЕ ---
         for (int i = 0; i < 8; i++) SpawnSinglePiece(6, i, 6);
         SpawnSinglePiece(7, 0, 7); SpawnSinglePiece(7, 7, 7);
         SpawnSinglePiece(8, 1, 7); SpawnSinglePiece(8, 6, 7);
