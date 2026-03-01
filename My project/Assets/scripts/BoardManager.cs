@@ -81,6 +81,10 @@ public class BoardManager : MonoBehaviour
         Cooldown
     }
 
+    [Header("Audio - SFX")]
+    [SerializeField] private AudioSource sfxSource;   // сюда перетащим AudioSource
+    [SerializeField] private AudioClip moveSlideClip; // сюда перетащим первый звук
+
     [Header("Rule Timeline (Rounds)")]
     public int startDelayRounds = 3;
     public int activeRuleRounds = 3;
@@ -209,6 +213,8 @@ public class BoardManager : MonoBehaviour
 
         if (capturedPiece != null)
             Destroy(capturedPiece.gameObject);
+
+        PlayMoveSlideSfx();    
 
         activePiece = null;
 
@@ -745,5 +751,22 @@ public class BoardManager : MonoBehaviour
             Gizmos.DrawWireCube(new Vector3(activePiece.currentX * tileSize, 0, activePiece.currentY * tileSize) + boardOffset,
                                 new Vector3(tileSize, 0.1f, tileSize));
         }
+    }
+
+    private void PlayMoveSlideSfx()
+    {
+        if (sfxSource == null)
+        {
+            Debug.LogWarning("[Audio] sfxSource not assigned!");
+            return;
+        }
+
+        if (moveSlideClip == null)
+        {
+            Debug.LogWarning("[Audio] moveSlideClip not assigned!");
+            return;
+        }
+
+        sfxSource.PlayOneShot(moveSlideClip);
     }
 }
