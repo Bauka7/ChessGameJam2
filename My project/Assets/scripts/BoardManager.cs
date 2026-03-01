@@ -29,7 +29,7 @@ public class BoardManager : MonoBehaviour
 
     [Header("Rules Shift")]
     [Tooltip("Через сколько ПОЛНЫХ раундов (белые+чёрные) включать правило")]
-    public int roundsPerShift = 4;          // каждые 4 раунда = 8 полуходов
+    public int roundsPerShift = 3;          // каждые 4 раунда = 8 полуходов
     [Tooltip("Сколько ПОЛНЫХ раундов действует правило")]
     public int ruleDurationRounds = 2;      // 2 раунда = 4 полухода
 
