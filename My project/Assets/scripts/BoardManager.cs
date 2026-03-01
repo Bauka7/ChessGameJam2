@@ -2,18 +2,21 @@
 using TMPro;
 using UnityEngine.UI;
 
-
 // ✅ enum наружу
 public enum RuleType
 {
     None,
-    PawnForwardCapture
+
+    PawnForwardCapture,     // Rule 1
+    AllPiecesMoveAsPawn,    // Rule 2
+    KnightsSlide,           // Rule 3
+    BishopPhase             // Rule 4
 }
 
 public class BoardManager : MonoBehaviour
 {
-
     public GameObject turnsBadge;
+
     [Header("Настройки доски")]
     private const int TILE_COUNT_X = 8;
     private const int TILE_COUNT_Y = 8;
@@ -27,11 +30,10 @@ public class BoardManager : MonoBehaviour
     [Header("Камера")]
     public CameraController cameraController;
 
-    [Header("Rules Shift")]
-    [Tooltip("Через сколько ПОЛНЫХ раундов (белые+чёрные) включать правило")]
-    public int roundsPerShift = 3;          // каждые 4 раунда = 8 полуходов
-    [Tooltip("Сколько ПОЛНЫХ раундов действует правило")]
-    public int ruleDurationRounds = 2;      // 2 раунда = 4 полухода
+    // ❌ СТАРЫЕ ПОЛЯ Rules Shift больше не используются:
+    // public int roundsPerShift
+    // public int ruleDurationRounds
+    // private int ruleHalfMovesLeft
 
     [Header("UI")]
     public TMP_Text turnsText;              // TurnsText (в углу)
@@ -44,7 +46,6 @@ public class BoardManager : MonoBehaviour
     public float turnsFontSize = 28f;
 
     private int halfMoveCount = 0;          // полуходы (каждый ход = +1)
-    private int ruleHalfMovesLeft = 0;      // сколько полуходов осталось у правила
     private RuleType currentRule = RuleType.None;
     private bool waitingForRulePanelConfirm = false;
 
@@ -58,13 +59,44 @@ public class BoardManager : MonoBehaviour
     // Флаг конца игры
     private bool gameOver = false;
 
+    // ===== RULE ORDER SYSTEM =====
+    private RuleType[] orderedRules = new RuleType[]
+    {
+        RuleType.PawnForwardCapture,
+        RuleType.AllPiecesMoveAsPawn,
+        RuleType.KnightsSlide,
+        RuleType.BishopPhase
+    };
+
+    private int orderedRuleIndex = 0;
+    private bool randomModeUnlocked = false;
+
+    // ===== RULE TIMELINE SYSTEM (3 start delay → 3 active → 2 cooldown) =====
+    private enum RulePhase
+    {
+        StartDelay,     // 3 раунда без правила в начале
+        ActiveRule,     // правило активно 3 раунда
+        Cooldown        // пауза 2 раунда
+    }
+
+    [Header("Rule Timeline (Rounds)")]
+    public int startDelayRounds = 3;   // 1️⃣ старт: 3 раунда без правила
+    public int activeRuleRounds = 3;   // правило действует 3 раунда
+    public int cooldownRounds = 2;     // пауза 2 раунда
+
+    private RulePhase rulePhase = RulePhase.StartDelay;
+    private int phaseHalfMovesLeft = 0; // сколько полуходов осталось в текущей фазе
+
     private void Start()
     {
         SpawnAllPieces();
 
         // На старте: правило не активно
         currentRule = RuleType.None;
-        ruleHalfMovesLeft = 0;
+
+        // Стартовая задержка: 3 раунда без правила
+        rulePhase = RulePhase.StartDelay;
+        phaseHalfMovesLeft = startDelayRounds * 2;
 
         // Прячем панель аккуратно (аниматор сам держит alpha=0)
         if (rulePanelAnimator != null)
@@ -78,7 +110,6 @@ public class BoardManager : MonoBehaviour
         }
 
         ApplyUiFontSizes();
-
         UpdateTurnsText();
     }
 
@@ -194,81 +225,114 @@ public class BoardManager : MonoBehaviour
         // ✅ полуход сделан
         halfMoveCount++;
 
-        // ✅ обновляем правила (таймер / включение)
-        UpdateRulesAfterMove();
+        // ✅ обновляем таймлайн правил (старт → правило → пауза → ...)
+        UpdateRuleTimeline();
 
         // Проверяем состояние игры
         CheckGameState();
     }
 
     // =============================================
-    // RULES SHIFT
+    // RULE TIMELINE (3 start delay → 3 active → 2 cooldown)
     // =============================================
-    private void UpdateRulesAfterMove()
+    private void UpdateRuleTimeline()
     {
-        // 1) если правило активно — уменьшаем таймер
-        if (ruleHalfMovesLeft > 0)
+        if (phaseHalfMovesLeft > 0)
+            phaseHalfMovesLeft--;
+
+        switch (rulePhase)
         {
-            ruleHalfMovesLeft--;
+            case RulePhase.StartDelay:
+                if (phaseHalfMovesLeft <= 0)
+                    StartNewRule();
+                break;
 
-            if (ruleHalfMovesLeft == 0)
-            {
-                currentRule = RuleType.None;
-                Debug.Log("RULE SHIFT END → Обычные шахматы");
-            }
+            case RulePhase.ActiveRule:
+                if (phaseHalfMovesLeft <= 0)
+                    EndCurrentRuleAndStartCooldown();
+                break;
 
-            UpdateTurnsText();
+            case RulePhase.Cooldown:
+                if (phaseHalfMovesLeft <= 0)
+                    StartNewRule();
+                break;
         }
 
-        // 2) каждые roundsPerShift раундов = каждые roundsPerShift*2 полуходов включаем правило
-        int shiftIntervalHalfMoves = roundsPerShift * 2;
-
-        if (halfMoveCount % shiftIntervalHalfMoves == 0)
-        {
-            // сейчас фиксированное первое правило
-            ActivateRule(RuleType.PawnForwardCapture);
-        }
+        UpdateTurnsText(); // ✅ всегда обновляем UI
     }
 
-    private void ActivateRule(RuleType newRule)
+    private void StartNewRule()
     {
-        currentRule = newRule;
-        ruleHalfMovesLeft = ruleDurationRounds * 2; // 2 раунда = 4 полухода
+        currentRule = GetNextRule();
+
+        rulePhase = RulePhase.ActiveRule;
+        phaseHalfMovesLeft = activeRuleRounds * 2;
+
         waitingForRulePanelConfirm = true;
 
-        Debug.Log($"RULE SHIFT: {GetRuleDescription()} ({ruleHalfMovesLeft} полухода)");
+        Debug.Log($"NEW RULE: {GetRuleDescription()} ({phaseHalfMovesLeft} полуходов)");
 
-        // обновляем уголок
         UpdateTurnsText();
 
-        // обновляем тексты панели
-        if (rulePanelTitle != null) rulePanelTitle.text = "RULE SHIFT";
-        if (rulePanelText != null)
-            rulePanelText.text = GetRuleDescription();
+        if (rulePanelTitle != null) rulePanelTitle.text = "NEW RULE";
+        if (rulePanelText != null) rulePanelText.text = GetRuleDescription();
 
         if (rulePanelOkButton != null)
             rulePanelOkButton.gameObject.SetActive(true);
 
-        // Показываем панель до подтверждения по кнопке OK
         if (rulePanelAnimator != null)
             rulePanelAnimator.ShowPersistent(true);
     }
 
+    private void EndCurrentRuleAndStartCooldown()
+    {
+        currentRule = RuleType.None;
+        rulePhase = RulePhase.Cooldown;
+        phaseHalfMovesLeft = cooldownRounds * 2;
+
+        Debug.Log("RULE ENDED → cooldown (pause)");
+
+        UpdateTurnsText();
+    }
+
+    private RuleType GetNextRule()
+    {
+        // сначала выдаем правила по порядку
+        if (!randomModeUnlocked)
+        {
+            RuleType rule = orderedRules[orderedRuleIndex];
+            orderedRuleIndex++;
+
+            if (orderedRuleIndex >= orderedRules.Length)
+            {
+                randomModeUnlocked = true; // после полного круга — включаем рандом
+                Debug.Log("RANDOM RULE MODE ACTIVATED");
+            }
+
+            return rule;
+        }
+
+        // дальше — случайное правило (и после каждого правила будет 2 раунда пауза)
+        int r = Random.Range(0, orderedRules.Length);
+        return orderedRules[r];
+    }
+
     private void UpdateTurnsText()
     {
-        bool show = (currentRule != RuleType.None && ruleHalfMovesLeft > 0);
+        bool show = (rulePhase == RulePhase.ActiveRule);
 
-        // включаем/выключаем фон (плашку)
         if (turnsBadge != null)
             turnsBadge.SetActive(show);
 
-        // включаем/выключаем сам текст
         if (turnsText != null)
         {
             turnsText.gameObject.SetActive(show);
 
             if (show)
-                turnsText.text = $"Turns left: {ruleHalfMovesLeft}";
+            {
+                int roundsLeft = Mathf.CeilToInt(phaseHalfMovesLeft / 2f);
+                turnsText.text = $"Rounds left: {roundsLeft}";
+            }
         }
     }
 
@@ -294,9 +358,27 @@ public class BoardManager : MonoBehaviour
         if (turnsText != null)
             turnsText.fontSize = turnsFontSize;
     }
+
+    // ✅ разные тексты для разных правил
     private string GetRuleDescription()
     {
-        return "Пешка может взять фигуру прямо впереди\nна 1 клетку, если там стоит враг.";
+        switch (currentRule)
+        {
+            case RuleType.PawnForwardCapture:
+                return "Пешка может атаковать фигуру\nпрямо перед собой.";
+
+            case RuleType.AllPiecesMoveAsPawn:
+                return "Все фигуры кроме короля\nходят как пешки.";
+
+            case RuleType.KnightsSlide:
+                return "Кони забыли как прыгать.\nХодят на 2 клетки по прямой.";
+
+            case RuleType.BishopPhase:
+                return "Слоны проходят сквозь фигуры.";
+
+            default:
+                return "";
+        }
     }
 
     // =============================================
@@ -422,6 +504,14 @@ public class BoardManager : MonoBehaviour
         if (chessPieces[targetX, targetY] != null && chessPieces[targetX, targetY].isWhite == piece.isWhite)
             return false;
 
+        // ===== RULE 2 — все фигуры как пешки =====
+        if (currentRule == RuleType.AllPiecesMoveAsPawn && piece.type != ChessPieceType.King)
+            return IsPawnMoveValid(piece, targetX, targetY);
+
+        // ===== RULE 3 — кони скользят =====
+        if (currentRule == RuleType.KnightsSlide && piece.type == ChessPieceType.Knight)
+            return IsKnightSlideMove(piece, targetX, targetY);
+
         switch (piece.type)
         {
             case ChessPieceType.Pawn: return IsPawnMoveValid(piece, targetX, targetY);
@@ -496,9 +586,39 @@ public class BoardManager : MonoBehaviour
         return (dx == 2 && dy == 1) || (dx == 1 && dy == 2);
     }
 
+    // RULE 3 — кони больше не прыгают, а "скользят" на 2 клетки по прямой
+    private bool IsKnightSlideMove(ChessPiece piece, int targetX, int targetY)
+    {
+        int dx = Mathf.Abs(targetX - piece.currentX);
+        int dy = Mathf.Abs(targetY - piece.currentY);
+
+        // только по прямой на 2 клетки
+        if ((dx == 2 && dy == 0) || (dx == 0 && dy == 2))
+        {
+            int xDir = (targetX > piece.currentX) ? 1 : (targetX < piece.currentX ? -1 : 0);
+            int yDir = (targetY > piece.currentY) ? 1 : (targetY < piece.currentY ? -1 : 0);
+
+            int checkX = piece.currentX + xDir;
+            int checkY = piece.currentY + yDir;
+
+            // нельзя перепрыгивать фигуры (в середине)
+            if (chessPieces[checkX, checkY] != null)
+                return false;
+
+            return true;
+        }
+
+        return false;
+    }
+
     private bool IsBishopMoveValid(ChessPiece piece, int targetX, int targetY)
     {
-        if (Mathf.Abs(targetX - piece.currentX) != Mathf.Abs(targetY - piece.currentY)) return false;
+        if (Mathf.Abs(targetX - piece.currentX) != Mathf.Abs(targetY - piece.currentY))
+            return false;
+
+        // RULE 4 — слон проходит сквозь фигуры
+        if (currentRule == RuleType.BishopPhase)
+            return true;
 
         int xDir = (targetX > piece.currentX) ? 1 : -1;
         int yDir = (targetY > piece.currentY) ? 1 : -1;
