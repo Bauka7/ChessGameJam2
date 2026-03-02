@@ -4,6 +4,8 @@ using TMPro;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 
+
+
 // ✅ enum наружу
 public enum RuleType
 {
@@ -11,7 +13,9 @@ public enum RuleType
     PawnForwardCapture,     // Rule 1
     AllPiecesMoveAsPawn,    // Rule 2
     KnightsSlide,           // Rule 3
-    BishopPhase             // Rule 4
+    BishopPhase,            // Rule 4
+    NoWayBack,              // Rule 5 — нельзя ходить назад
+    KingIsKnight            // Rule 6 — король ходит как конь
 }
 
 public class BoardManager : MonoBehaviour
@@ -31,6 +35,27 @@ public class BoardManager : MonoBehaviour
     [Header("Камера")]
     public CameraController cameraController;
 
+    // =============================================
+    // ✅ HIGHLIGHT — подсветка возможных ходов
+    // =============================================
+    [Header("Highlight (подсветка ходов)")]
+    [Tooltip("Префаб подсветки — Quad с MeshRenderer, Y ~ 0.05")]
+    public GameObject highlightPrefab;
+
+    [Tooltip("Материал для пустой клетки (зелёный, прозрачный)")]
+    public Material highlightMoveMaterial;
+
+    [Tooltip("Материал для клетки с вражеской фигурой (красный, прозрачный)")]
+    public Material highlightCaptureMaterial;
+
+    [Tooltip("Материал для выбранной фигуры (синий/жёлтый)")]
+    public Material highlightSelectedMaterial;
+
+    // Массив хайлайт-объектов: по одному на каждую клетку
+    private GameObject[,] highlightTiles;
+    // Отдельный объект подсветки выбранной фигуры
+    private GameObject selectedHighlight;
+
     [Header("UI")]
     public TMP_Text turnsText;
     public TMP_Text rulePanelTitle;
@@ -42,8 +67,8 @@ public class BoardManager : MonoBehaviour
     public float turnsFontSize = 28f;
 
     [Header("UI - Check & Game Over")]
-    public CheckWarningUI checkWarningUI; // ✅ ссылка на UIManager (где висит CheckWarningUI)
-    public TMP_Text checkText;            // ✅ CheckText внутри CheckPanel
+    public CheckWarningUI checkWarningUI;
+    public TMP_Text checkText;
 
     public GameObject gameOverPanel;
     public TMP_Text gameOverTitleText;
@@ -68,7 +93,9 @@ public class BoardManager : MonoBehaviour
         RuleType.PawnForwardCapture,
         RuleType.AllPiecesMoveAsPawn,
         RuleType.KnightsSlide,
-        RuleType.BishopPhase
+        RuleType.BishopPhase,
+        RuleType.NoWayBack,
+        RuleType.KingIsKnight
     };
 
     private int orderedRuleIndex = 0;
@@ -82,8 +109,14 @@ public class BoardManager : MonoBehaviour
     }
 
     [Header("Audio - SFX")]
-    [SerializeField] private AudioSource sfxSource;   // сюда перетащим AudioSource
-    [SerializeField] private AudioClip moveSlideClip; // сюда перетащим первый звук
+    [SerializeField] private AudioSource sfxSource;
+    [SerializeField] private AudioClip moveSlideClip;
+
+    [Tooltip("Звук при выборе фигуры (опционально)")]
+    [SerializeField] private AudioClip selectPieceClip;
+
+    [Tooltip("Короткий звук при смене правила (~2 сек)")]
+    [SerializeField] private AudioClip ruleChangeClip;
 
     [Header("Rule Timeline (Rounds)")]
     public int startDelayRounds = 3;
@@ -96,6 +129,9 @@ public class BoardManager : MonoBehaviour
     private void Start()
     {
         SpawnAllPieces();
+
+        // ✅ Инициализируем массив подсветок (пустые слоты)
+        highlightTiles = new GameObject[TILE_COUNT_X, TILE_COUNT_Y];
 
         currentRule = RuleType.None;
 
@@ -113,7 +149,6 @@ public class BoardManager : MonoBehaviour
             rulePanelOkButton.gameObject.SetActive(false);
         }
 
-        // ✅ скрыть UI
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (checkWarningUI != null) checkWarningUI.HideImmediate();
 
@@ -161,8 +196,21 @@ public class BoardManager : MonoBehaviour
         }
         else { hoverX = -1; hoverY = -1; }
 
+        // ✅ ПРАВАЯ кнопка мыши — снять выделение
+        if (Input.GetMouseButtonDown(1))
+        {
+            ClearHighlights();
+            activePiece = null;
+            return;
+        }
+
         if (Input.GetMouseButtonDown(0) && hoverX != -1 && hoverY != -1)
         {
+            // ✅ Проверка: не кликаем ли по UI?
+            if (UnityEngine.EventSystems.EventSystem.current != null &&
+                UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+                return;
+
             if (activePiece == null)
                 SelectPiece(hoverX, hoverY);
             else
@@ -170,29 +218,149 @@ public class BoardManager : MonoBehaviour
         }
     }
 
+    // =============================================
+    // ✅ SELECT + HIGHLIGHT
+    // =============================================
     private void SelectPiece(int x, int y)
     {
         if (chessPieces[x, y] == null) return;
 
         if (chessPieces[x, y].isWhite == isWhiteTurn)
+        {
             activePiece = chessPieces[x, y];
+
+            // ✅ Показываем возможные ходы
+            ShowHighlights(activePiece);
+
+            // ✅ Звук выбора фигуры (опционально)
+            PlaySelectSfx();
+        }
         else
+        {
             Debug.Log("Сейчас не ваш ход!");
+        }
     }
 
+    // =============================================
+    // ✅ HIGHLIGHT — основные методы
+    // =============================================
+
+    /// <summary>
+    /// Показывает подсветку для всех допустимых ходов выбранной фигуры.
+    /// Зелёный = пустая клетка, Красный = вражеская фигура, Синий/Жёлтый = сама фигура.
+    /// </summary>
+    private void ShowHighlights(ChessPiece piece)
+    {
+        // Сначала очищаем старую подсветку
+        ClearHighlights();
+
+        if (highlightPrefab == null)
+        {
+            Debug.LogWarning("[Highlight] highlightPrefab не назначен в Inspector!");
+            return;
+        }
+
+        // ✅ Подсветка выбранной фигуры
+        selectedHighlight = SpawnHighlight(piece.currentX, piece.currentY, highlightSelectedMaterial);
+
+        // ✅ Перебираем все клетки доски
+        for (int tx = 0; tx < TILE_COUNT_X; tx++)
+        {
+            for (int ty = 0; ty < TILE_COUNT_Y; ty++)
+            {
+                // Пропускаем клетку самой фигуры
+                if (tx == piece.currentX && ty == piece.currentY) continue;
+
+                // Проверяем: допустим ли ход по правилам?
+                if (!IsValidMove(piece, tx, ty)) continue;
+
+                // Проверяем: не приводит ли ход к шаху своего короля?
+                if (DoesMoveCauseCheck(piece, tx, ty, piece.isWhite)) continue;
+
+                // Определяем цвет подсветки
+                bool isEnemy = (chessPieces[tx, ty] != null && chessPieces[tx, ty].isWhite != piece.isWhite);
+                Material mat = isEnemy ? highlightCaptureMaterial : highlightMoveMaterial;
+
+                highlightTiles[tx, ty] = SpawnHighlight(tx, ty, mat);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Создаёт один объект подсветки на заданной клетке.
+    /// </summary>
+    private GameObject SpawnHighlight(int x, int y, Material mat)
+    {
+        // Позиция: центр клетки, Y чуть выше доски (0.05f), чтобы не z-fight
+        Vector3 pos = new Vector3(x * tileSize + 2.04f, 0.05f, y * tileSize + 2f) + boardOffset;
+
+        GameObject go = Instantiate(highlightPrefab, pos, Quaternion.Euler(90f, 0f, 0f), transform);
+        go.name = $"Highlight_{x}_{y}";
+
+        // ✅ Устанавливаем материал
+        if (mat != null)
+        {
+            MeshRenderer mr = go.GetComponent<MeshRenderer>();
+            if (mr != null) mr.material = mat;
+        }
+
+        return go;
+    }
+
+    /// <summary>
+    /// Удаляет все объекты подсветки с доски.
+    /// </summary>
+    private void ClearHighlights()
+    {
+        // Очищаем подсветку всех клеток
+        for (int x = 0; x < TILE_COUNT_X; x++)
+        {
+            for (int y = 0; y < TILE_COUNT_Y; y++)
+            {
+                if (highlightTiles[x, y] != null)
+                {
+                    Destroy(highlightTiles[x, y]);
+                    highlightTiles[x, y] = null;
+                }
+            }
+        }
+
+        // Очищаем подсветку выбранной фигуры
+        if (selectedHighlight != null)
+        {
+            Destroy(selectedHighlight);
+            selectedHighlight = null;
+        }
+    }
+
+    // =============================================
+    // MOVE PIECE
+    // =============================================
     private void MovePiece(int x, int y)
     {
         if (activePiece == null) return;
 
-        if (chessPieces[x, y] != null && chessPieces[x, y].isWhite == activePiece.isWhite)
+        // ✅ Клик на ту же фигуру — снять выделение
+        if (x == activePiece.currentX && y == activePiece.currentY)
         {
-            SelectPiece(x, y);
+            ClearHighlights();
+            activePiece = null;
             return;
         }
 
+        // ✅ Клик на другую свою фигуру — переключить выделение
+        if (chessPieces[x, y] != null && chessPieces[x, y].isWhite == activePiece.isWhite)
+        {
+            activePiece = chessPieces[x, y];
+            ShowHighlights(activePiece);
+            return;
+        }
+
+        // ✅ Проверка допустимости хода
         if (!IsValidMove(activePiece, x, y))
         {
             Debug.Log("Ход недопустим по правилам!");
+            ClearHighlights();
             activePiece = null;
             return;
         }
@@ -200,9 +368,13 @@ public class BoardManager : MonoBehaviour
         if (DoesMoveCauseCheck(activePiece, x, y, activePiece.isWhite))
         {
             Debug.Log("Нельзя! Ваш король окажется под шахом!");
+            ClearHighlights();
             activePiece = null;
             return;
         }
+
+        // ✅ Убираем подсветку перед ходом
+        ClearHighlights();
 
         ChessPiece capturedPiece = chessPieces[x, y];
 
@@ -214,7 +386,7 @@ public class BoardManager : MonoBehaviour
         if (capturedPiece != null)
             Destroy(capturedPiece.gameObject);
 
-        PlayMoveSlideSfx();    
+        PlayMoveSlideSfx();
 
         activePiece = null;
 
@@ -229,24 +401,21 @@ public class BoardManager : MonoBehaviour
 
         halfMoveCount++;
 
-        // ✅ СНАЧАЛА проверяем мат/пат/шах
         CheckGameState();
 
-        // ✅ Если игра не закончена — только тогда обновляем правила
         if (!gameOver)
         {
             UpdateRuleTimeline();
         }
         else
         {
-            // ✅ На всякий случай закрываем rule UI, чтобы не вылезло
             ForceHideRuleUI();
         }
     }
 
     private void UpdateRuleTimeline()
     {
-        if (gameOver) return; // ✅ защита
+        if (gameOver) return;
 
         if (phaseHalfMovesLeft > 0)
             phaseHalfMovesLeft--;
@@ -269,7 +438,7 @@ public class BoardManager : MonoBehaviour
 
     private void StartNewRule()
     {
-        if (gameOver) return; // ✅ защита
+        if (gameOver) return;
 
         currentRule = GetNextRule();
 
@@ -277,6 +446,13 @@ public class BoardManager : MonoBehaviour
         phaseHalfMovesLeft = activeRuleRounds * 2;
 
         waitingForRulePanelConfirm = true;
+
+        // ✅ Звук смены правила — один короткий звук
+        PlayRuleChangeSfx();
+
+        // ✅ При открытии панели правил — убираем подсветку
+        ClearHighlights();
+        activePiece = null;
 
         if (rulePanelTitle != null) rulePanelTitle.text = "NEW RULE";
         if (rulePanelText != null) rulePanelText.text = GetRuleDescription();
@@ -347,10 +523,13 @@ public class BoardManager : MonoBehaviour
             rulePanelAnimator.HideNow();
     }
 
-    // ✅ безопасно скрываем Rule UI (без NullReference)
     private void ForceHideRuleUI()
     {
         waitingForRulePanelConfirm = false;
+
+        // ✅ При Game Over убираем подсветку
+        ClearHighlights();
+        activePiece = null;
 
         if (rulePanelOkButton != null)
             rulePanelOkButton.gameObject.SetActive(false);
@@ -379,12 +558,14 @@ public class BoardManager : MonoBehaviour
             case RuleType.AllPiecesMoveAsPawn: return "Все фигуры кроме короля\nходят как пешки.";
             case RuleType.KnightsSlide: return "Кони забыли как прыгать.\nХодят на 2 клетки по прямой.";
             case RuleType.BishopPhase: return "Слоны проходят сквозь фигуры.";
+            case RuleType.NoWayBack: return "Движение только вперёд!\nНикто не может отступать назад.";
+            case RuleType.KingIsKnight: return "Король возомнил себя конём.\nПрыгает буквой Г.";
             default: return "";
         }
     }
 
     // =============================================
-    // ✅ UI: CHECK + GAME OVER
+    // UI: CHECK + GAME OVER
     // =============================================
     private void ShowCheckWarning(bool whiteKingInCheck)
     {
@@ -411,7 +592,6 @@ public class BoardManager : MonoBehaviour
 
     private void ShowGameOver(string title, string body)
     {
-        // ✅ закрываем лишние UI
         ForceHideRuleUI();
         HideCheckWarning();
 
@@ -445,21 +625,14 @@ public class BoardManager : MonoBehaviour
         bool kingInCheck = IsKingInCheck(sideToMoveIsWhite);
         bool hasLegalMoves = HasAnyLegalMove(sideToMoveIsWhite);
 
-        // CHECKMATE
         if (kingInCheck && !hasLegalMoves)
         {
             gameOver = true;
-
             bool whiteWon = !sideToMoveIsWhite;
-
-            ShowGameOver(
-                "CHECKMATE",
-                whiteWon ? "Белые победили!" : "Чёрные победили!"
-            );
+            ShowGameOver("CHECKMATE", whiteWon ? "Белые победили!" : "Чёрные победили!");
             return;
         }
 
-        // STALEMATE
         if (!kingInCheck && !hasLegalMoves)
         {
             gameOver = true;
@@ -467,7 +640,6 @@ public class BoardManager : MonoBehaviour
             return;
         }
 
-        // CHECK
         if (kingInCheck)
             ShowCheckWarning(sideToMoveIsWhite);
         else
@@ -523,13 +695,11 @@ public class BoardManager : MonoBehaviour
 
         ChessPiece capturedBackup = chessPieces[toX, toY];
 
-        // ✅ Симулируем ход только в массиве
         chessPieces[fromX, fromY] = null;
         chessPieces[toX, toY] = piece;
 
         bool inCheck = IsKingInCheck(isWhitePiece);
 
-        // ✅ Откат
         chessPieces[fromX, fromY] = piece;
         chessPieces[toX, toY] = capturedBackup;
 
@@ -570,22 +740,33 @@ public class BoardManager : MonoBehaviour
             chessPieces[targetX, targetY].isWhite == piece.isWhite)
             return false;
 
-        // RULE 2: все фигуры как пешки
+        // RULE 5: нельзя ходить назад
+        if (currentRule == RuleType.NoWayBack)
+        {
+            // Белые идут вверх (Y увеличивается), чёрные вниз (Y уменьшается)
+            // Запрещаем ход, если Y уменьшается для белых или увеличивается для чёрных
+            if (piece.isWhite && targetY < piece.currentY) return false;
+            if (!piece.isWhite && targetY > piece.currentY) return false;
+        }
+
+        // RULE 6: король ходит как конь
+        if (currentRule == RuleType.KingIsKnight && piece.type == ChessPieceType.King)
+            return IsKnightMoveValid(piece, targetX, targetY);
+
         if (currentRule == RuleType.AllPiecesMoveAsPawn && piece.type != ChessPieceType.King)
             return IsPawnMoveValid(piece, targetX, targetY);
 
-        // RULE 3: кони скользят
         if (currentRule == RuleType.KnightsSlide && piece.type == ChessPieceType.Knight)
             return IsKnightSlideMove(piece, targetX, targetY);
 
         switch (piece.type)
         {
-            case ChessPieceType.Pawn: return IsPawnMoveValid(piece, targetX, targetY);
-            case ChessPieceType.Rook: return IsRookMoveValid(piece, targetX, targetY);
+            case ChessPieceType.Pawn:   return IsPawnMoveValid(piece, targetX, targetY);
+            case ChessPieceType.Rook:   return IsRookMoveValid(piece, targetX, targetY);
             case ChessPieceType.Knight: return IsKnightMoveValid(piece, targetX, targetY);
             case ChessPieceType.Bishop: return IsBishopMoveValid(piece, targetX, targetY);
-            case ChessPieceType.Queen: return IsRookMoveValid(piece, targetX, targetY) || IsBishopMoveValid(piece, targetX, targetY);
-            case ChessPieceType.King: return IsKingMoveValid(piece, targetX, targetY);
+            case ChessPieceType.Queen:  return IsRookMoveValid(piece, targetX, targetY) || IsBishopMoveValid(piece, targetX, targetY);
+            case ChessPieceType.King:   return IsKingMoveValid(piece, targetX, targetY);
         }
 
         return false;
@@ -755,18 +936,22 @@ public class BoardManager : MonoBehaviour
 
     private void PlayMoveSlideSfx()
     {
-        if (sfxSource == null)
-        {
-            Debug.LogWarning("[Audio] sfxSource not assigned!");
-            return;
-        }
-
-        if (moveSlideClip == null)
-        {
-            Debug.LogWarning("[Audio] moveSlideClip not assigned!");
-            return;
-        }
-
+        if (sfxSource == null || moveSlideClip == null) return;
         sfxSource.PlayOneShot(moveSlideClip);
+    }
+
+    private void PlaySelectSfx()
+    {
+        if (sfxSource == null || selectPieceClip == null) return;
+        sfxSource.PlayOneShot(selectPieceClip);
+    }
+
+    // ✅ Короткий звук при смене правила — играет один раз и заканчивается сам
+    private void PlayRuleChangeSfx()
+    {
+        if (sfxSource == null || ruleChangeClip == null) return;
+        // Stop любой текущий звук на sfxSource и играем новый
+        sfxSource.Stop();
+        sfxSource.PlayOneShot(ruleChangeClip);
     }
 }
