@@ -9,9 +9,9 @@ public class CheckWarningUI : MonoBehaviour
     [SerializeField] private CanvasGroup group;    // CanvasGroup на CheckPanel
 
     [Header("Animation Settings")]
-    [SerializeField] private float fadeInTime = 0.25f;
-    [SerializeField] private float visibleTime = 1.2f;
-    [SerializeField] private float fadeOutTime = 0.25f;
+    [SerializeField] private float fadeInTime = 0.20f;
+[SerializeField] private float visibleTime = 3f;   // ← 3 секунды
+[SerializeField] private float fadeOutTime = 0.20f;
 
     private Coroutine routine;
 
@@ -54,7 +54,7 @@ public class CheckWarningUI : MonoBehaviour
         float t = 0f;
         while (t < fadeInTime)
         {
-            t += Time.deltaTime;
+            t += Time.unscaledDeltaTime;
             group.alpha = Mathf.Clamp01(t / fadeInTime);
             yield return null;
         }
@@ -62,13 +62,13 @@ public class CheckWarningUI : MonoBehaviour
         group.alpha = 1f;
 
         // Hold
-        yield return new WaitForSeconds(visibleTime);
+        yield return new WaitForSecondsRealtime(visibleTime);
 
         // Fade Out
         t = 0f;
         while (t < fadeOutTime)
         {
-            t += Time.deltaTime;
+            t += Time.unscaledDeltaTime;
             group.alpha = 1f - Mathf.Clamp01(t / fadeOutTime);
             yield return null;
         }

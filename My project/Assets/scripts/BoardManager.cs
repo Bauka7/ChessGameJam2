@@ -66,7 +66,11 @@ public class BoardManager : MonoBehaviour
     public float rulePanelBodyFontSize = 30f;
     public float turnsFontSize = 28f;
 
+
     [Header("UI - Check & Game Over")]
+    public GameObject gameOverOverlay;
+
+    public GameOverPanelFX gameOverPanelFX;
     public CheckWarningUI checkWarningUI;
     public TMP_Text checkText;
 
@@ -172,7 +176,8 @@ public class BoardManager : MonoBehaviour
             rulePanelOkButton.gameObject.SetActive(false);
         }
 
-        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (gameOverOverlay != null) gameOverOverlay.SetActive(false);
+            if (gameOverPanel != null) gameOverPanel.SetActive(false);
         if (checkWarningUI != null) checkWarningUI.HideImmediate();
 
         // Buttons
@@ -659,22 +664,20 @@ public class BoardManager : MonoBehaviour
     }
 
     private void ShowGameOver(string title, string body)
-    {
-        ForceHideRuleUI();
-        HideCheckWarning();
+{
+    ForceHideRuleUI();
+    HideCheckWarning();
+    StopBGM();
 
-        // 🎵 Останавливаем фоновую музыку при конце игры
-        StopBGM();
+    if (gameOverOverlay != null) gameOverOverlay.SetActive(true);
+    if (gameOverPanel != null) gameOverPanel.SetActive(true);
 
-        if (gameOverPanel != null) gameOverPanel.SetActive(true);
-        else Debug.LogWarning("[GameOver] gameOverPanel NOT assigned!");
+    if (gameOverTitleText != null) gameOverTitleText.text = title;
+    if (gameOverBodyText != null) gameOverBodyText.text = body;
 
-        if (gameOverTitleText != null) gameOverTitleText.text = title;
-        else Debug.LogWarning("[GameOver] gameOverTitleText NOT assigned!");
-
-        if (gameOverBodyText != null) gameOverBodyText.text = body;
-        else Debug.LogWarning("[GameOver] gameOverBodyText NOT assigned!");
-    }
+    if (gameOverPanelFX != null)
+        gameOverPanelFX.PlayShow();
+}
 
     private void RestartScene()
     {
