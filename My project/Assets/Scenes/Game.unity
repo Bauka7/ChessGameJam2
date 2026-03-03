@@ -852,6 +852,103 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
+--- !u!82 &534457789
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 534457785}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &687780568
 GameObject:
   m_ObjectHideFlags: 0
@@ -3861,9 +3958,25 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      propertyPath: bgmClip
+      value: 
+      objectReference: {fileID: 8300000, guid: 2b083645d1552a1459fc3bc83c964d61, type: 3}
+    - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       propertyPath: ruleText
       value: 
       objectReference: {fileID: 349335748}
+    - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      propertyPath: bgmSource
+      value: 
+      objectReference: {fileID: 534457789}
+    - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      propertyPath: bgmVolume
+      value: 0.191
+      objectReference: {fileID: 0}
+    - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      propertyPath: checkClip
+      value: 
+      objectReference: {fileID: 8300000, guid: 5172e72fea68fc74dbc76ba660ccc626, type: 3}
     - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       propertyPath: checkText
       value: 
@@ -3893,6 +4006,10 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 1641926602}
     - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      propertyPath: checkmateClip
+      value: 
+      objectReference: {fileID: 8300000, guid: 5172e72fea68fc74dbc76ba660ccc626, type: 3}
+    - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       propertyPath: gameOverPanel
       value: 
       objectReference: {fileID: 882256375}
@@ -3915,7 +4032,7 @@ PrefabInstance:
     - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       propertyPath: ruleChangeClip
       value: 
-      objectReference: {fileID: 8300000, guid: 0da24bb4f39995943859f0d8c1ac25d0, type: 3}
+      objectReference: {fileID: 8300000, guid: 27d55ac33fc90ca40a6949bd485e1bed, type: 3}
     - target: {fileID: 6292800394949332411, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       propertyPath: rulePanelTitle
       value: 
@@ -3971,6 +4088,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 7670741099483223036, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
       insertIndex: -1
       addedObject: {fileID: 534457786}
+    - targetCorrespondingSourceObject: {fileID: 7670741099483223036, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 534457789}
   m_SourcePrefab: {fileID: 100100000, guid: 59e81247d87c90340b92d94ef8e7b7b6, type: 3}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

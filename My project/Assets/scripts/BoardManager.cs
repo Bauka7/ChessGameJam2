@@ -108,6 +108,9 @@ public class BoardManager : MonoBehaviour
         Cooldown
     }
 
+    // =============================================
+    // 🔊 AUDIO — SFX
+    // =============================================
     [Header("Audio - SFX")]
     [SerializeField] private AudioSource sfxSource;
     [SerializeField] private AudioClip moveSlideClip;
@@ -117,6 +120,26 @@ public class BoardManager : MonoBehaviour
 
     [Tooltip("Короткий звук при смене правила (~2 сек)")]
     [SerializeField] private AudioClip ruleChangeClip;
+
+    [Tooltip("Звук при шахе (Shah)")]
+    [SerializeField] private AudioClip checkClip;
+
+    [Tooltip("Звук при мате (победа)")]
+    [SerializeField] private AudioClip checkmateClip;
+
+    // =============================================
+    // 🎵 AUDIO — Фоновая музыка (BGM)
+    // =============================================
+    [Header("Audio - Фоновая музыка")]
+    [Tooltip("AudioSource для фоновой музыки. Создай отдельный GameObject с AudioSource и перетащи сюда.")]
+    [SerializeField] private AudioSource bgmSource;
+
+    [Tooltip("Аудио клип фоновой музыки (будет играть по кругу)")]
+    [SerializeField] private AudioClip bgmClip;
+
+    [Tooltip("Громкость фоновой музыки (0 = тихо, 1 = полная громкость)")]
+    [Range(0f, 1f)]
+    [SerializeField] private float bgmVolume = 0.4f;
 
     [Header("Rule Timeline (Rounds)")]
     public int startDelayRounds = 3;
@@ -168,7 +191,49 @@ public class BoardManager : MonoBehaviour
         ApplyUiFontSizes();
         UpdateTurnsText();
 
+        // 🎵 Запускаем фоновую музыку
+        StartBGM();
+
         Debug.Log("[BoardManager] Start OK. Scene: " + SceneManager.GetActiveScene().name);
+    }
+
+    // =============================================
+    // 🎵 Фоновая музыка
+    // =============================================
+
+    /// <summary>
+    /// Запускает фоновую музыку. Вызывается один раз при старте игры.
+    /// </summary>
+    private void StartBGM()
+    {
+        if (bgmSource == null)
+        {
+            Debug.LogWarning("[BGM] bgmSource не назначен в Inspector! Создай GameObject с AudioSource и назначь его.");
+            return;
+        }
+
+        if (bgmClip == null)
+        {
+            Debug.LogWarning("[BGM] bgmClip не назначен в Inspector! Перетащи аудио файл в поле BGM Clip.");
+            return;
+        }
+
+        bgmSource.clip = bgmClip;
+        bgmSource.loop = true;           // 🔁 Играет по кругу
+        bgmSource.volume = bgmVolume;    // 🔊 Устанавливаем громкость
+        bgmSource.playOnAwake = false;
+        bgmSource.Play();
+
+        Debug.Log("[BGM] Фоновая музыка запущена.");
+    }
+
+    /// <summary>
+    /// Останавливает фоновую музыку (например, при победе или выходе в меню).
+    /// </summary>
+    private void StopBGM()
+    {
+        if (bgmSource != null && bgmSource.isPlaying)
+            bgmSource.Stop();
     }
 
     private void Update()
@@ -582,6 +647,9 @@ public class BoardManager : MonoBehaviour
             checkWarningUI.ShowCheck();
         else
             Debug.LogWarning("[CHECK UI] checkWarningUI is NOT assigned in Inspector!");
+
+        // 🔊 Звук шаха
+        PlayCheckSfx();
     }
 
     private void HideCheckWarning()
@@ -594,6 +662,9 @@ public class BoardManager : MonoBehaviour
     {
         ForceHideRuleUI();
         HideCheckWarning();
+
+        // 🎵 Останавливаем фоновую музыку при конце игры
+        StopBGM();
 
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
         else Debug.LogWarning("[GameOver] gameOverPanel NOT assigned!");
@@ -629,6 +700,10 @@ public class BoardManager : MonoBehaviour
         {
             gameOver = true;
             bool whiteWon = !sideToMoveIsWhite;
+
+            // 🔊 Звук мата (победы) — останавливает BGM и играет победный звук
+            PlayCheckmateSfx();
+
             ShowGameOver("CHECKMATE", whiteWon ? "Белые победили!" : "Чёрные победили!");
             return;
         }
@@ -636,6 +711,10 @@ public class BoardManager : MonoBehaviour
         if (!kingInCheck && !hasLegalMoves)
         {
             gameOver = true;
+
+            // 🔊 При пате тоже можно сыграть звук мата (ничья)
+            PlayCheckmateSfx();
+
             ShowGameOver("STALEMATE", "ПАТ! Ничья");
             return;
         }
@@ -743,8 +822,6 @@ public class BoardManager : MonoBehaviour
         // RULE 5: нельзя ходить назад
         if (currentRule == RuleType.NoWayBack)
         {
-            // Белые идут вверх (Y увеличивается), чёрные вниз (Y уменьшается)
-            // Запрещаем ход, если Y уменьшается для белых или увеличивается для чёрных
             if (piece.isWhite && targetY < piece.currentY) return false;
             if (!piece.isWhite && targetY > piece.currentY) return false;
         }
@@ -934,6 +1011,10 @@ public class BoardManager : MonoBehaviour
         }
     }
 
+    // =============================================
+    // 🔊 AUDIO — методы воспроизведения
+    // =============================================
+
     private void PlayMoveSlideSfx()
     {
         if (sfxSource == null || moveSlideClip == null) return;
@@ -946,12 +1027,33 @@ public class BoardManager : MonoBehaviour
         sfxSource.PlayOneShot(selectPieceClip);
     }
 
-    // ✅ Короткий звук при смене правила — играет один раз и заканчивается сам
+    // ✅ Короткий звук при смене правила
     private void PlayRuleChangeSfx()
     {
         if (sfxSource == null || ruleChangeClip == null) return;
-        // Stop любой текущий звук на sfxSource и играем новый
         sfxSource.Stop();
         sfxSource.PlayOneShot(ruleChangeClip);
+    }
+
+    /// <summary>
+    /// 🔊 Звук шаха — играет когда король под ударом.
+    /// </summary>
+    private void PlayCheckSfx()
+    {
+        if (sfxSource == null || checkClip == null) return;
+        sfxSource.PlayOneShot(checkClip);
+    }
+
+    /// <summary>
+    /// 🔊 Звук мата/победы — останавливает BGM и играет победный звук.
+    /// </summary>
+    private void PlayCheckmateSfx()
+    {
+        // Останавливаем фоновую музыку
+        StopBGM();
+
+        if (sfxSource == null || checkmateClip == null) return;
+        sfxSource.Stop();
+        sfxSource.PlayOneShot(checkmateClip);
     }
 }
